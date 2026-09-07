@@ -157,9 +157,7 @@ h2.tit{font-size:1.05rem;margin:0 0 .8rem}
         <div class="auto"><label>&nbsp;</label><button class="sec" id="btnGirar">Girar 90°</button></div>
         <div class="auto"><label for="inclina">Inclinación (°)</label>
           <input type="number" id="inclina" value="0" step="0.25" min="-8" max="8" style="width:95px"></div>
-        <div class="auto"><label for="sensib">Sensibilidad de línea</label>
-          <input type="number" id="sensib" value="45" min="15" max="90" step="5" style="width:95px"></div>
-        <div class="auto"><label>&nbsp;</label><button class="sec" id="btnRedetectar">Volver a detectar</button></div>
+        <div class="auto"><label>&nbsp;</label><button class="sec" id="btnRedetectar">Detectar de nuevo</button></div>
       </div>
       <div class="lienzo-caja"><canvas id="lienzoGrid"></canvas></div>
       <p class="nota" id="notaGrid"></p>
@@ -385,15 +383,167 @@ function agrupar(arr, umbral){
   }
   return fus;
 }
-function detectarCortes(cv, pct){
-  const {bin,w,h} = binarizar(cv);
-  const filas = new Uint32Array(h), cols = new Uint32Array(w);
+
+/* ---- Umbral local (Bradley) ----
+   Mejor que Otsu global cuando el escaneo tiene sombras o líneas tenues:
+   compara cada píxel con el promedio de su vecindario, no de toda la hoja. */
+function binarizarLocal(cv){
+  const {width:w, height:h} = cv;
+  const d = cv.getContext("2d",{willReadFrequently:true}).getImageData(0,0,w,h).data;
+  const gris = new Uint8Array(w*h);
+  for(let i=0,p=0;i<d.length;i+=4,p++)
+    gris[p] = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000 | 0;
+  // imagen integral
+  const S = new Float64Array((w+1)*(h+1));
   for(let y=0;y<h;y++){
-    const off=y*w; let c=0;
-    for(let x=0;x<w;x++) if(bin[off+x]){ c++; cols[x]++; }
-    filas[y]=c;
+    let acum = 0;
+    for(let x=0;x<w;x++){
+      acum += gris[y*w+x];
+      S[(y+1)*(w+1)+(x+1)] = S[y*(w+1)+(x+1)] + acum;
+    }
   }
-  return {cortesY: agrupar(filas, w*pct/100), cortesX: agrupar(cols, h*pct/100)};
+  const r = Math.max(8, Math.round(w/16));   // radio del vecindario
+  const t = 0.90;                            // 10% por debajo del promedio local
+  const bin = new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    const y0 = Math.max(0,y-r), y1 = Math.min(h-1,y+r);
+    for(let x=0;x<w;x++){
+      const x0 = Math.max(0,x-r), x1 = Math.min(w-1,x+r);
+      const n = (x1-x0+1)*(y1-y0+1);
+      const suma = S[(y1+1)*(w+1)+(x1+1)] - S[y0*(w+1)+(x1+1)]
+                 - S[(y1+1)*(w+1)+x0] + S[y0*(w+1)+x0];
+      bin[y*w+x] = (gris[y*w+x]*n < suma*t) ? 1 : 0;
+    }
+  }
+  return {bin,w,h};
+}
+
+/* ---- Máscaras de línea por longitud de trazo ----
+   Conserva solo píxeles que forman parte de un tramo continuo largo.
+   El texto (trazos de 3-6 px) y las diagonales desaparecen; las líneas
+   de la tabla sobreviven. Tolera cortes de hasta `puente` píxeles. */
+function mascaraHorizontal(bin, w, h, minLargo, puente){
+  const m = new Uint8Array(w*h);
+  const fila = new Uint8Array(w);
+  for(let y=0;y<h;y++){
+    const off = y*w;
+    fila.set(bin.subarray(off, off+w));
+    // cerrar huecos pequeños
+    let ultimo = -1;
+    for(let x=0;x<w;x++){
+      if(fila[x]){
+        if(ultimo >= 0 && x-ultimo <= puente+1)
+          for(let k=ultimo+1;k<x;k++) fila[k] = 1;
+        ultimo = x;
+      }
+    }
+    // conservar tramos largos
+    let ini = -1;
+    for(let x=0;x<=w;x++){
+      if(x<w && fila[x]){ if(ini<0) ini = x; }
+      else if(ini >= 0){
+        if(x-ini >= minLargo) for(let k=ini;k<x;k++) m[off+k] = 1;
+        ini = -1;
+      }
+    }
+  }
+  return m;
+}
+function mascaraVertical(bin, w, h, minLargo, puente){
+  const m = new Uint8Array(w*h);
+  const col = new Uint8Array(h);
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++) col[y] = bin[y*w+x];
+    let ultimo = -1;
+    for(let y=0;y<h;y++){
+      if(col[y]){
+        if(ultimo >= 0 && y-ultimo <= puente+1)
+          for(let k=ultimo+1;k<y;k++) col[k] = 1;
+        ultimo = y;
+      }
+    }
+    let ini = -1;
+    for(let y=0;y<=h;y++){
+      if(y<h && col[y]){ if(ini<0) ini = y; }
+      else if(ini >= 0){
+        if(y-ini >= minLargo) for(let k=ini;k<y;k++) m[k*w+x] = 1;
+        ini = -1;
+      }
+    }
+  }
+  return m;
+}
+
+/* ---- Regularizar: las filas de estos formatos son equiespaciadas ----
+   Descarta líneas dobles y repone las que el escaneo se comió. */
+function regularizar(lineas){
+  if(lineas.length < 3) return lineas;
+  const gaps = [];
+  for(let i=1;i<lineas.length;i++) gaps.push(lineas[i]-lineas[i-1]);
+  const orden = [...gaps].sort((a,b)=>a-b);
+  const med = orden[Math.floor(orden.length/2)];
+  if(!med) return lineas;
+  const out = [lineas[0]];
+  for(let i=1;i<lineas.length;i++){
+    const g = lineas[i] - out[out.length-1];
+    if(g < med*0.55) continue;                      // línea duplicada
+    const faltan = Math.round(g/med) - 1;           // huecos por reponer
+    if(faltan > 0 && faltan <= 4){
+      const paso = g/(faltan+1);
+      for(let k=1;k<=faltan;k++) out.push(Math.round(out[out.length-1]+paso));
+    }
+    out.push(lineas[i]);
+  }
+  return out;
+}
+
+/* ---- Detección automática de la tabla ----
+   Sin parámetros que ajustar: deriva los mínimos del tamaño de la hoja
+   y acota el análisis al recuadro donde realmente hay líneas. */
+function detectarTabla(cv){
+  const chico = reducir(cv, 1600);
+  const fx = cv.width / chico.width;
+  const {bin,w,h} = binarizarLocal(chico);
+
+  const mh = mascaraHorizontal(bin, w, h, Math.round(w*0.22), Math.round(w*0.010));
+  const mv = mascaraVertical  (bin, w, h, Math.round(h*0.10), Math.round(h*0.008));
+
+  // recuadro de la tabla: donde viven las líneas largas
+  let x0=w, x1=0, y0=h, y1=0, hay=false;
+  for(let y=0;y<h;y++){
+    const off=y*w;
+    for(let x=0;x<w;x++){
+      if(mh[off+x] || mv[off+x]){
+        hay=true;
+        if(x<x0)x0=x; if(x>x1)x1=x;
+        if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(!hay) return {cortesY:[], cortesX:[], diag:"No se encontraron líneas de tabla"};
+
+  const bw = x1-x0+1, bh = y1-y0+1;
+  const projY = new Uint32Array(h), projX = new Uint32Array(w);
+  for(let y=y0;y<=y1;y++){
+    const off=y*w;
+    for(let x=x0;x<=x1;x++){
+      if(mh[off+x]) projY[y]++;
+      if(mv[off+x]) projX[x]++;
+    }
+  }
+  let cy = regularizar(agrupar(projY, bw*0.45));
+  let cx = regularizar(agrupar(projX, bh*0.35));
+
+  // segundo intento más permisivo si el primero quedó corto
+  if(cy.length < 3) cy = regularizar(agrupar(projY, bw*0.28));
+  if(cx.length < 3) cx = regularizar(agrupar(projX, bh*0.20));
+
+  const esc = v => Math.round(v*fx);
+  return {
+    cortesY: cy.map(esc),
+    cortesX: cx.map(esc),
+    diag: `${Math.max(0,cy.length-1)} fila(s), ${Math.max(0,cx.length-1)} columna(s)`
+  };
 }
 
 /* ============ DETECCIÓN DE POBLACIÓN Y ORIENTACIÓN ============
@@ -504,7 +654,7 @@ async function cargarArchivo(file){
   reconstruir();
   const nf = Math.max(0, S.cortesY.length-1);
   marcar("grid", nf ? "hecho" : "falla",
-    nf ? `Tabla detectada · ${nf} fila(s)` : "No se encontró la tabla. Ajusta la sensibilidad.");
+    nf ? `Tabla detectada · ${nf} fila(s)` : "No se encontró la tabla. Revisa el giro en Ajustar la detección.");
 
   await esperar();
   entrarCaptura();
@@ -512,7 +662,7 @@ async function cargarArchivo(file){
 
 function reconstruir(){
   S.base = transformar(S.paginas[S.idxPag], S.giro, S.inclinacion);
-  const r = detectarCortes(S.base, parseInt($("sensib").value,10));
+  const r = detectarTabla(S.base);
   S.cortesY = r.cortesY; S.cortesX = r.cortesX;
   const cv = $("lienzoGrid");
   cv.width = S.base.width; cv.height = S.base.height;
@@ -527,8 +677,9 @@ function reconstruir(){
   $("notaGrid").textContent =
     `${Math.max(0,S.cortesY.length-1)} fila(s) y ${Math.max(0,S.cortesX.length-1)} columna(s). ` +
     `El formato espera ${esp} columnas. ` +
-    (S.cortesX.length-1 === esp ? "Coinciden."
-      : "No coinciden: se reparten proporcionalmente, o baja la sensibilidad para hallar más líneas.");
+    (S.cortesX.length-1 === esp
+      ? "Coinciden."
+      : "No coinciden, así que las columnas se reparten proporcionalmente sobre el ancho de la tabla.");
 }
 
 function entrarCaptura(){
@@ -566,7 +717,7 @@ function prepararDatos(){
 function irA(f,c){
   const cols = columnas();
   if(!S.datos.length){
-    $("ubic").textContent = "No se detectaron filas. Ajusta la sensibilidad de línea.";
+    $("ubic").textContent = "No se detectaron filas. Revisa el giro y la inclinación en Ajustar la detección.";
     return;
   }
   if(f < 0) f = 0;
