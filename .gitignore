@@ -1,0 +1,21 @@
+# Nunca subir documentos ni datos de pacientes al repositorio
+*.pdf
+*.xlsx
+*.xls
+*.csv
+*.jpg
+*.jpeg
+*.png
+*.tif
+*.tiff
+/escaneos/
+/salidas/
+/pruebas/
+
+# Sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+node_modules/
