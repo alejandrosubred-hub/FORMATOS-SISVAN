@@ -28,7 +28,7 @@ correcta.
 - Adultos
 - Gestantes — semanas de gestación, número de controles, FUM
 - Menores de 5 años — peso, talla, datos de quien recibe la visita
-- Recién nacidos — peso y talla al nacer, edad gestacional
+- Recién nacidos — peso y talla al nacer
 
 ## Cómo se usa
 
