@@ -291,7 +291,7 @@ function validarCelda(col, valor, fila){
 
 /* ===================== ESTADO ===================== */
 const S = {paginas:[], idxPag:0, giro:0, inclinacion:0, base:null,
-  cortesY:[], cortesX:[], datos:[], fila:0, col:0, plantilla:"ADULTOS", auto:null};
+  cortesY:[], cortesX:[], datos:[], fila:0, col:0, plantilla:"ADULTOS", auto:null, lecturaOcr:null};
 const $ = id => document.getElementById(id);
 const pantalla = id => document.querySelectorAll(".pantalla")
   .forEach(s => s.classList.toggle("viva", s.id === id));
@@ -554,37 +554,65 @@ function detectarTabla(cv){
 const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
 
 function bandaSuperior(cv){
-  const alto = Math.round(cv.height * 0.16);
-  const esc = Math.min(1, 1300/cv.width);
+  // Banda amplia: el título no siempre queda en el borde exacto
+  const alto = Math.round(cv.height * 0.30);
+  const escala = Math.min(2.2, 1800/cv.width);
   const o = document.createElement("canvas");
-  o.width = Math.round(cv.width*esc);
-  o.height = Math.round(alto*esc);
-  const ctx = o.getContext("2d");
-  ctx.fillStyle="#fff"; ctx.fillRect(0,0,o.width,o.height);
+  o.width  = Math.round(cv.width*escala);
+  o.height = Math.round(alto*escala);
+  const ctx = o.getContext("2d", {willReadFrequently:true});
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,o.width,o.height);
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(cv, 0, 0, cv.width, alto, 0, 0, o.width, o.height);
+  // realce de contraste: el texto impreso se separa del fondo del escaneo
+  const im = ctx.getImageData(0,0,o.width,o.height);
+  const d = im.data;
+  let min=255, max=0;
+  for(let i=0;i<d.length;i+=4){
+    const g = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+    if(g<min) min=g; if(g>max) max=g;
+  }
+  const rango = Math.max(1, max-min);
+  for(let i=0;i<d.length;i+=4){
+    const g = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+    let v = (g-min)/rango*255;
+    v = v < 150 ? 0 : 255;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(im,0,0);
   return o;
 }
+
+// Coincidencia tolerante: el OCR se equivoca en letras sueltas,
+// así que basta con una raíz reconocible de cada palabra clave.
+const RAICES = [
+  {p:"RECIEN_NACIDOS", r:["nacido","nacidos","recien"]},
+  {p:"MENORES_5",      r:["menore","menor de","de 5 an","5 anos"]},
+  {p:"GESTANTES",      r:["gestant","gestan"]},
+  {p:"ADULTOS",        r:["adulto","adultos"]}
+];
 function emparejar(texto){
   const t = sinTildes(texto).replace(/\s+/g," ");
-  for(const k of ["RECIEN_NACIDOS","MENORES_5","GESTANTES","ADULTOS"]){
-    for(const clave of PLANTILLAS[k].claves){
-      if(t.includes(sinTildes(clave))) return k;
-    }
-  }
+  for(const {p,r} of RAICES)
+    for(const raiz of r)
+      if(t.includes(raiz)) return p;
   return null;
 }
+
 async function detectarTipoYGiro(src, worker){
   const orden = src.height > src.width ? [90,270,0,180] : [0,180,90,270];
+  const leido = [];
   for(const g of orden){
     let txt = "";
     try{
       const r = await worker.recognize(bandaSuperior(transformar(src,g,0)));
-      txt = r.data.text || "";
-    }catch(e){ continue; }
+      txt = (r.data.text || "").replace(/\s+/g," ").trim();
+    }catch(e){ leido.push(`${g}\u00b0: error`); continue; }
+    leido.push(`${g}\u00b0: ${txt.slice(0,45) || "(vac\u00edo)"}`);
     const hit = emparejar(txt);
-    if(hit) return {giro:g, plantilla:hit};
+    if(hit) return {giro:g, plantilla:hit, leido};
   }
-  return null;
+  return {giro:null, plantilla:null, leido};
 }
 
 /* ===================== FLUJO ===================== */
@@ -623,14 +651,22 @@ async function cargarArchivo(file){
 
   marcar("orient","activo");
   await esperar();
-  let det = null, worker = null;
-  try{
-    worker = await Tesseract.createWorker("spa");
-    det = await detectarTipoYGiro(S.paginas[0], worker);
-  }catch(e){ det = null; }
-  finally{ if(worker){ try{ await worker.terminate(); }catch(e){} } }
+  let det = null, worker = null, motorOk = false, errMotor = "";
+  for(const idioma of ["spa","eng"]){
+    try{
+      worker = await Tesseract.createWorker(idioma);
+      motorOk = true;
+      det = await detectarTipoYGiro(S.paginas[0], worker);
+      break;
+    }catch(e){
+      errMotor = (e && e.message) ? e.message : String(e);
+    }finally{
+      if(worker){ try{ await worker.terminate(); }catch(e){} worker = null; }
+    }
+  }
+  S.lecturaOcr = det ? det.leido : null;
 
-  if(det){
+  if(det && det.plantilla){
     S.giro = det.giro; S.plantilla = det.plantilla; S.auto = true;
     marcar("orient","hecho", S.giro ? `Hoja girada ${S.giro}°` : "La hoja ya estaba derecha");
     marcar("tipo","hecho", `Formato reconocido: ${PLANTILLAS[det.plantilla].nombre}`);
@@ -638,8 +674,13 @@ async function cargarArchivo(file){
     const p = S.paginas[0];
     S.giro = p.height > p.width ? 90 : 0;
     S.auto = false;
-    marcar("orient","falla","No se pudo confirmar la orientación. Revísala en Ajustar.");
-    marcar("tipo","falla","No se reconoció el encabezado. Elige el formato tú.");
+    if(!motorOk){
+      marcar("orient","falla","El lector de encabezados no cargó (red o CDN bloqueado).");
+      marcar("tipo","falla","Elige el formato y el giro tú en Ajustar la detección.");
+    }else{
+      marcar("orient","falla","No se identificó la orientación por el encabezado.");
+      marcar("tipo","falla","El lector sí funcionó pero no halló la palabra clave. Ver detalle abajo.");
+    }
   }
 
   marcar("ender","activo");
@@ -686,9 +727,18 @@ function entrarCaptura(){
   pantalla("scCaptura");
   $("plantilla").value = S.plantilla;
   $("tituloPob").textContent = PLANTILLAS[S.plantilla].nombre;
-  $("detalle").textContent = S.auto
-    ? `Reconocido en el encabezado del documento. ${Math.max(0,S.cortesY.length-1)} filas por digitar.`
-    : "No se reconoció el encabezado, así que este es el formato por defecto. Confírmalo antes de seguir.";
+  if(S.auto){
+    $("detalle").textContent =
+      `Reconocido en el encabezado del documento. ${Math.max(0,S.cortesY.length-1)} filas por digitar.`;
+  } else {
+    let txt = "No se reconoci\u00f3 el encabezado, as\u00ed que este es el formato por defecto. " +
+              "Confirma la poblaci\u00f3n y revisa el giro en Ajustar la detecci\u00f3n.";
+    if(S.lecturaOcr && S.lecturaOcr.length)
+      txt += "  \u2014  Lo que ley\u00f3 en cada giro: " + S.lecturaOcr.join("  |  ");
+    else
+      txt += "  \u2014  El lector de encabezados no lleg\u00f3 a ejecutarse.";
+    $("detalle").textContent = txt;
+  }
   $("ajustes").open = !S.auto;
   prepararDatos();
   irA(0,0);
