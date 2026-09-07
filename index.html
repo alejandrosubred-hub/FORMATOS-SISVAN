@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Digitalizador de caracterizaciones · Subred Sur</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --tinta:#0c2340; --tinta-2:#41628a;
+  --papel:#f2f6fb; --papel-2:#dce7f4; --linea:#a9c1de;
+  --azul:#1565a8; --azul-claro:#dcebf9; --azul-hondo:#08192e;
+  --ambar:#a05e00; --ambar-fondo:#fdf2dd;
+  --verde:#1c6b58; --rojo:#94243a; --rojo-fondo:#fbe7eb;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--papel);color:var(--tinta);
+  font-family:"Inter","Segoe UI",system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5}
+.barra{background:linear-gradient(100deg,var(--azul-hondo) 0%,var(--tinta) 45%,var(--azul) 100%);
+  color:#fff;padding:.7rem 1.1rem;
+  display:flex;align-items:baseline;gap:.9rem;flex-wrap:wrap;position:sticky;top:0;z-index:20;
+  border-bottom:3px solid var(--azul)}
+.barra h1{font-size:1rem;font-weight:600;margin:0}
+.barra .sede{font-size:.8rem;color:#b6d2ec}
+.barra .autor{margin-left:auto;font-size:.8rem;color:#dcebf9;text-align:right;line-height:1.35}
+.barra .autor b{display:block;font-weight:600;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:1.6rem 1.1rem 5rem}
+.pantalla{display:none}
+.pantalla.viva{display:block}
+
+#zona{border:2px dashed var(--linea);padding:3.4rem 1rem;text-align:center;cursor:pointer;background:#fff}
+#zona.sobre{border-color:var(--azul);background:var(--azul-claro)}
+#zona strong{display:block;font-size:1.15rem;margin-bottom:.35rem}
+#zona p{margin:.2rem 0;color:var(--tinta-2);font-size:.88rem}
+.explica{font-size:.85rem;color:var(--tinta-2);margin-top:1.1rem;max-width:64ch}
+
+.trabajo{border:1px solid var(--linea);background:#fff;padding:1.4rem}
+.trabajo ol{list-style:none;padding:0;margin:0}
+.trabajo li{padding:.4rem 0 .4rem 1.7rem;position:relative;color:var(--tinta-2);font-size:.92rem}
+.trabajo li::before{content:"·";position:absolute;left:.45rem;color:var(--linea);font-weight:700}
+.trabajo li.hecho{color:var(--tinta)}
+.trabajo li.hecho::before{content:"✓";color:var(--verde);font-size:.85rem}
+.trabajo li.activo{color:var(--azul);font-weight:500}
+.trabajo li.activo::before{content:"›";color:var(--azul);font-weight:700}
+.trabajo li.falla::before{content:"!";color:var(--ambar);font-weight:700}
+
+.confirma{border:1px solid var(--tinta);background:#fff;padding:1.1rem;margin-bottom:1rem}
+.confirma h3{margin:0 0 .3rem;font-size:1.05rem}
+.confirma .det{font-size:.86rem;color:var(--tinta-2);margin:0}
+.confirma .fila{margin-top:.9rem}
+
+label{display:block;font-size:.8rem;color:var(--tinta-2);margin-bottom:.25rem}
+select,input[type=text],input[type=number]{font-family:inherit;font-size:.92rem;padding:.42rem .55rem;
+  border:1px solid var(--linea);background:#fff;color:var(--tinta);width:100%}
+select:focus,input:focus,button:focus-visible{outline:2px solid var(--azul);outline-offset:1px}
+button{font-family:inherit;font-size:.88rem;font-weight:500;padding:.45rem .85rem;
+  border:1px solid var(--tinta);background:var(--tinta);color:#fff;cursor:pointer}
+button.sec{background:#fff;color:var(--tinta)}
+.fila{display:flex;gap:.7rem;flex-wrap:wrap;align-items:flex-end}
+.fila > .auto{flex:0 0 auto}
+
+details{border:1px solid var(--linea);background:#fff;margin-bottom:1rem}
+details > summary{padding:.55rem .9rem;cursor:pointer;font-size:.86rem;background:var(--papel-2)}
+details .cuerpo{padding:.9rem;border-top:1px solid var(--linea)}
+.lienzo-caja{border:1px solid var(--linea);background:var(--papel-2);overflow:auto;max-height:380px}
+.lienzo-caja canvas{display:block;max-width:100%}
+
+.captura{display:grid;grid-template-columns:1.25fr .85fr;gap:1rem}
+@media(max-width:820px){.captura{grid-template-columns:1fr}}
+.visor{border:1px solid var(--tinta);background:#fff;display:grid;place-items:center;min-height:190px;padding:.5rem}
+.visor canvas{max-width:100%;image-rendering:crisp-edges}
+.ubic{font-size:.78rem;color:var(--tinta-2);margin-bottom:.4rem}
+.ubic b{color:var(--tinta)}
+#campo{font-size:1.15rem;padding:.55rem;width:100%;border:2px solid var(--tinta)}
+#campo.num{font-family:"SF Mono",Menlo,Consolas,monospace;letter-spacing:.06em}
+#campo.mal{border-color:var(--rojo);background:var(--rojo-fondo)}
+#campo.dudo{border-color:var(--ambar);background:var(--ambar-fondo)}
+.aviso{font-size:.8rem;margin-top:.4rem;min-height:1.2rem}
+.aviso.mal{color:var(--rojo)} .aviso.ok{color:var(--verde)} .aviso.dudo{color:var(--ambar)}
+.atajos{font-size:.75rem;color:var(--tinta-2);margin-top:.9rem;line-height:1.75}
+.atajos kbd{border:1px solid var(--linea);background:var(--papel);padding:.05rem .3rem;font-size:.72rem}
+.progreso{height:3px;background:var(--papel-2);margin:.2rem 0 .9rem}
+.progreso i{display:block;height:100%;background:var(--azul);transition:width .18s}
+table.rev{width:100%;border-collapse:collapse;font-size:.78rem}
+table.rev th,table.rev td{border:1px solid var(--linea);padding:.28rem .4rem;text-align:left;white-space:nowrap}
+table.rev th{background:var(--papel-2);font-weight:600;position:sticky;top:0}
+table.rev td.d{background:var(--ambar-fondo)} table.rev td.v{background:var(--rojo-fondo)}
+.tabla-caja{max-height:300px;overflow:auto;border:1px solid var(--linea);margin-top:.9rem}
+.nota{font-size:.8rem;color:var(--tinta-2);border-left:3px solid var(--linea);padding-left:.7rem;margin-top:.9rem}
+.pie{font-size:.75rem;color:var(--tinta-2);text-align:center;padding:1.6rem 1rem;border-top:2px solid var(--azul)}
+.pie .firma{display:block;color:var(--tinta);font-weight:600;font-size:.85rem;margin-bottom:.25rem}
+.confirma{border-top:4px solid var(--azul)}
+.trabajo{border-top:4px solid var(--azul)}
+#zona{border-radius:2px}
+.visor{border-color:var(--azul)}
+#campo{border-color:var(--azul)}
+table.rev th{background:var(--tinta);color:#fff;border-color:var(--tinta)}
+h2.tit{font-size:1.05rem;margin:0 0 .8rem}
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <h1>Digitalizador de caracterizaciones</h1>
+  <span class="sede">Subred Integrada de Servicios de Salud Sur E.S.E.</span>
+  <span class="autor"><b>Alejandro Ortega</b>Subred Sur · SISVAN</span>
+</div>
+
+<main>
+
+<section class="pantalla viva" id="scCarga">
+  <div id="zona">
+    <strong>Arrastra el formato escaneado</strong>
+    <p>o haz clic para buscarlo · PDF, JPG o PNG</p>
+    <input type="file" id="archivo" accept="application/pdf,image/*" hidden>
+  </div>
+  <p class="explica">Reconoce el tipo de formato por su encabezado y lo prepara para digitar:
+  gira la hoja, la endereza y recorta las casillas. Los datos escritos a mano los tecleas tú,
+  porque a esta calidad de escaneo ningún lector automático acierta lo suficiente en una cédula.</p>
+</section>
+
+<section class="pantalla" id="scTrabajo">
+  <div class="trabajo">
+    <h2 class="tit">Preparando el formato</h2>
+    <ol id="pasos">
+      <li data-p="leer">Leyendo el archivo</li>
+      <li data-p="orient">Buscando la orientación correcta</li>
+      <li data-p="tipo">Identificando la población</li>
+      <li data-p="ender">Enderezando la hoja</li>
+      <li data-p="grid">Detectando la tabla</li>
+    </ol>
+  </div>
+</section>
+
+<section class="pantalla" id="scCaptura">
+  <div class="confirma">
+    <h3 id="tituloPob"></h3>
+    <p class="det" id="detalle"></p>
+    <div class="fila">
+      <div style="max-width:250px">
+        <label for="plantilla">Si no acertó, corrígelo</label>
+        <select id="plantilla"></select>
+      </div>
+      <div class="auto"><label>&nbsp;</label><button class="sec" id="btnOtro">Cargar otro archivo</button></div>
+    </div>
+  </div>
+
+  <details id="ajustes">
+    <summary>Ajustar la detección</summary>
+    <div class="cuerpo">
+      <div class="fila" style="margin-bottom:.8rem">
+        <div class="auto"><label for="pagina">Página</label><select id="pagina"></select></div>
+        <div class="auto"><label>&nbsp;</label><button class="sec" id="btnGirar">Girar 90°</button></div>
+        <div class="auto"><label for="inclina">Inclinación (°)</label>
+          <input type="number" id="inclina" value="0" step="0.25" min="-8" max="8" style="width:95px"></div>
+        <div class="auto"><label>&nbsp;</label><button class="sec" id="btnRedetectar">Detectar de nuevo</button></div>
+      </div>
+      <div class="lienzo-caja"><canvas id="lienzoGrid"></canvas></div>
+      <p class="nota" id="notaGrid"></p>
+    </div>
+  </details>
+
+  <div class="progreso"><i id="barra" style="width:0"></i></div>
+  <div class="captura">
+    <div>
+      <div class="visor"><canvas id="recorte"></canvas></div>
+      <p class="atajos">
+        <kbd>Enter</kbd> guarda y avanza · <kbd>Shift</kbd>+<kbd>Enter</kbd> retrocede<br>
+        <kbd>Ctrl</kbd>+<kbd>I</kbd> marca la celda como ilegible · <kbd>Ctrl</kbd>+<kbd>↓</kbd> salta a la fila siguiente
+      </p>
+    </div>
+    <div>
+      <p class="ubic" id="ubic"></p>
+      <label for="campo" id="etiqCampo">Valor</label>
+      <input type="text" id="campo" autocomplete="off" spellcheck="false">
+      <p class="aviso" id="aviso"></p>
+      <div class="fila" style="margin-top:.7rem">
+        <div class="auto"><button class="sec" id="btnAtras">Anterior</button></div>
+        <div class="auto"><button id="btnSig">Siguiente</button></div>
+        <div class="auto"><button class="sec" id="btnXlsx">Descargar Excel</button></div>
+        <div class="auto"><button class="sec" id="btnCsv">CSV</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="tabla-caja"><table class="rev" id="tablaRev"></table></div>
+</section>
+
+<p class="pie">
+  <span class="firma">Alejandro Ortega · Subred Sur — SISVAN</span>
+  Uso interno · Ley 1581 de 2012 y Decreto 1377 de 2013 · Procesamiento local, ningún dato sale de este equipo
+</p>
+</main>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ===================== PLANTILLAS ===================== */
+const V = {
+  texto:  () => ({ok:true}),
+  nombre: v => /^[A-Za-zÁÉÍÓÚÑáéíóúñ' .-]{2,40}$/.test(v) ? {ok:true}
+              : {ok:false, msg:"Solo letras, entre 2 y 40 caracteres"},
+  cc:     v => /^\d{6,10}$/.test(v) ? {ok:true} : {ok:false, msg:"La cédula lleva entre 6 y 10 dígitos"},
+  rc:     v => /^\d{10,11}$/.test(v) ? {ok:true} : {ok:false, msg:"El registro civil lleva 10 u 11 dígitos"},
+  doc:    v => /^[A-Za-z0-9-]{5,15}$/.test(v) ? {ok:true} : {ok:false, msg:"Entre 5 y 15 caracteres"},
+  tel:    v => /^\d{7}$|^\d{10}$/.test(v) ? {ok:true} : {ok:false, msg:"Fijo de 7 dígitos o celular de 10"},
+  fecha:  v => {
+    const m = v.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if(!m) return {ok:false, msg:"Usa dd/mm/aa o dd/mm/aaaa"};
+    if(+m[1]<1||+m[1]>31) return {ok:false, msg:"Día fuera de rango"};
+    if(+m[2]<1||+m[2]>12) return {ok:false, msg:"Mes fuera de rango"};
+    let a = m[3]; if(a.length===2) a = "20"+a;
+    return {ok:true, norm:`${a}-${String(+m[2]).padStart(2,"0")}-${String(+m[1]).padStart(2,"0")}`};
+  },
+  entero:(min,max)=>v=>{ const n=parseInt(v,10);
+    if(isNaN(n)) return {ok:false,msg:"Debe ser un número"};
+    return (n<min||n>max) ? {ok:false,msg:`Debe estar entre ${min} y ${max}`} : {ok:true}; },
+  decimal:(min,max,u)=>v=>{ const n=parseFloat(v.replace(",","."));
+    if(isNaN(n)) return {ok:false,msg:"Debe ser un número"};
+    return (n<min||n>max) ? {ok:false,msg:`Fuera de rango (${min}–${max} ${u})`} : {ok:true,norm:String(n)}; }
+};
+const TIPOS_ID = ["CC","TI","RC","CE","PA","PPT","PEP","MS","AS","DE","NUIP"];
+const LOCALIDADES = ["Ciudad Bolívar","Tunjuelito","Usme","Bosa","Sumapaz","Rafael Uribe Uribe"];
+
+const BASE = [
+  {k:"UPGD", t:"texto", ancho:2.0},
+  {k:"SUBRED", t:"texto", ancho:0.8, fijo:"Sur"},
+  {k:"FECHA_CONSULTA", t:"fecha", ancho:1.0, num:true},
+  {k:"TIPO_ID", t:"lista", ancho:0.7, opciones:TIPOS_ID},
+  {k:"ID", t:"cc", ancho:1.2, num:true},
+  {k:"PRIMER_NOMBRE", t:"nombre", ancho:1.1},
+  {k:"SEGUNDO_NOMBRE", t:"nombre", ancho:1.1, opcional:true},
+  {k:"PRIMER_APELLIDO", t:"nombre", ancho:1.1},
+  {k:"SEGUNDO_APELLIDO", t:"nombre", ancho:1.1, opcional:true},
+  {k:"DIRECCION_RESIDENCIA", t:"texto", ancho:1.8},
+  {k:"LOCALIDAD_RESIDENCIA", t:"lista", ancho:1.2, opciones:LOCALIDADES},
+  {k:"TELEFONO", t:"tel", ancho:1.1, num:true},
+  {k:"FECHA_VISITA", t:"fecha", ancho:1.0, num:true}
+];
+const RECEPTOR = [
+  {k:"NOMBRE_QUIEN_RECIBE", t:"texto", ancho:1.8},
+  {k:"TIPO_ID_RECEPTOR", t:"lista", ancho:.7, opciones:TIPOS_ID},
+  {k:"ID_RECEPTOR", t:"doc", ancho:1.2, num:true}
+];
+const clonar = a => a.map(c => ({...c}));
+
+const PLANTILLAS = {
+  ADULTOS:  {nombre:"Adultos", claves:["adultos","adulto"], columnas: clonar(BASE)},
+  GESTANTES:{nombre:"Gestantes", claves:["gestantes","gestante"], columnas:[...clonar(BASE),
+    {k:"SEMANAS_GESTACION", t:"entero", ancho:.8, num:true, min:1, max:44, opcional:true},
+    {k:"NUM_CONTROLES", t:"entero", ancho:.8, num:true, min:0, max:20, opcional:true},
+    {k:"FUM", t:"fecha", ancho:1.0, num:true, opcional:true}]},
+  MENORES_5:{nombre:"Menores de 5 años", claves:["menores de 5","menores","menor de 5"],
+    columnas:[...clonar(BASE),
+    {k:"PESO_KG", t:"decimal", ancho:.8, num:true, min:1, max:35, unidad:"kg", opcional:true},
+    {k:"TALLA_CM", t:"decimal", ancho:.8, num:true, min:35, max:130, unidad:"cm", opcional:true},
+    ...clonar(RECEPTOR)]},
+  RECIEN_NACIDOS:{nombre:"Recién nacidos", claves:["recien nacidos","recien nacido","nacidos"],
+    columnas:[...clonar(BASE),
+    {k:"PESO_NACER_G", t:"entero", ancho:.9, num:true, min:400, max:6000, opcional:true},
+    {k:"TALLA_NACER_CM", t:"decimal", ancho:.8, num:true, min:25, max:60, unidad:"cm", opcional:true},
+    {k:"EDAD_GESTACIONAL_SEM", t:"entero", ancho:.8, num:true, min:22, max:44, opcional:true},
+    ...clonar(RECEPTOR)]}
+};
+
+function validarCelda(col, valor, fila){
+  if(valor === "") return col.opcional ? {ok:true} : {ok:null, msg:"Campo vacío"};
+  if(valor === "[ILEGIBLE]") return {ok:null, msg:"Marcada como ilegible"};
+  if(col.t === "lista"){
+    const up = valor.toUpperCase();
+    const exacto = col.opciones.find(o => o.toUpperCase() === up);
+    if(exacto) return {ok:true, norm:exacto};
+    const parc = col.opciones.filter(o => o.toUpperCase().startsWith(up));
+    if(parc.length === 1) return {ok:true, norm:parc[0]};
+    return {ok:false, msg:"Opciones: " + col.opciones.join(", ")};
+  }
+  if(col.k === "ID"){
+    const t = (fila["TIPO_ID"]||"").toUpperCase();
+    if(t === "RC" || t === "NUIP") return V.rc(valor);
+    if(["CC","TI","CE"].includes(t)) return V.cc(valor);
+    return V.doc(valor);
+  }
+  if(col.t === "entero")  return V.entero(col.min, col.max)(valor);
+  if(col.t === "decimal") return V.decimal(col.min, col.max, col.unidad)(valor);
+  return (V[col.t] || V.texto)(valor);
+}
+
+/* ===================== ESTADO ===================== */
+const S = {paginas:[], idxPag:0, giro:0, inclinacion:0, base:null,
+  cortesY:[], cortesX:[], datos:[], fila:0, col:0, plantilla:"ADULTOS", auto:null, lecturaOcr:null};
+const $ = id => document.getElementById(id);
+const pantalla = id => document.querySelectorAll(".pantalla")
+  .forEach(s => s.classList.toggle("viva", s.id === id));
+function marcar(p, cls, txt){
+  const li = document.querySelector(`#pasos li[data-p="${p}"]`);
+  if(!li) return;
+  li.className = cls || "";
+  if(txt) li.textContent = txt;
+}
+const esperar = () => new Promise(r => setTimeout(r, 30));
+
+/* ===================== IMAGEN ===================== */
+function binarizar(cv){
+  const {width:w, height:h} = cv;
+  const d = cv.getContext("2d",{willReadFrequently:true}).getImageData(0,0,w,h).data;
+  const gris = new Uint8Array(w*h), hist = new Uint32Array(256);
+  for(let i=0,p=0;i<d.length;i+=4,p++){
+    const g = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000 | 0;
+    gris[p]=g; hist[g]++;
+  }
+  const total = w*h;
+  let suma=0; for(let i=0;i<256;i++) suma += i*hist[i];
+  let sumaB=0, wB=0, mejor=0, umbral=128;
+  for(let t=0;t<256;t++){
+    wB += hist[t]; if(!wB) continue;
+    const wF = total-wB; if(!wF) break;
+    sumaB += t*hist[t];
+    const mB=sumaB/wB, mF=(suma-sumaB)/wF;
+    const e = wB*wF*(mB-mF)*(mB-mF);
+    if(e>mejor){mejor=e; umbral=t;}
+  }
+  const bin = new Uint8Array(total);
+  for(let p=0;p<total;p++) bin[p] = gris[p] < umbral ? 1 : 0;
+  return {bin,w,h};
+}
+function reducir(cv,maxLado){
+  const f = Math.min(1, maxLado/Math.max(cv.width,cv.height));
+  if(f===1) return cv;
+  const o = document.createElement("canvas");
+  o.width = Math.round(cv.width*f); o.height = Math.round(cv.height*f);
+  o.getContext("2d").drawImage(cv,0,0,o.width,o.height);
+  return o;
+}
+function transformar(src, giro, incl){
+  const gw = (giro%180===0) ? src.width : src.height;
+  const gh = (giro%180===0) ? src.height : src.width;
+  const cv = document.createElement("canvas");
+  cv.width=gw; cv.height=gh;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle="#fff"; ctx.fillRect(0,0,gw,gh);
+  ctx.translate(gw/2,gh/2);
+  ctx.rotate(giro*Math.PI/180 + incl*Math.PI/180);
+  ctx.drawImage(src, -src.width/2, -src.height/2);
+  return cv;
+}
+function puntajeIncl(bin,w,h,g){
+  const tan = Math.tan(g*Math.PI/180);
+  const paso = Math.max(1, Math.floor(h/700));
+  const perf = [];
+  for(let y=0;y<h;y+=paso){
+    let c=0;
+    for(let x=0;x<w;x+=2){
+      const yy = (y + (x-w/2)*tan)|0;
+      if(yy>=0 && yy<h) c += bin[yy*w+x];
+    }
+    perf.push(c);
+  }
+  const m = perf.reduce((a,b)=>a+b,0)/perf.length;
+  return perf.reduce((a,b)=>a+(b-m)*(b-m),0)/perf.length;
+}
+function estimarInclinacion(cv){
+  const {bin,w,h} = binarizar(reducir(cv,900));
+  let mA=0, mP=-1;
+  for(let a=-4;a<=4;a+=0.5){ const p=puntajeIncl(bin,w,h,a); if(p>mP){mP=p;mA=a;} }
+  for(let a=mA-0.5;a<=mA+0.5;a+=0.1){ const p=puntajeIncl(bin,w,h,a); if(p>mP){mP=p;mA=a;} }
+  return Math.round(mA*10)/10;
+}
+function agrupar(arr, umbral){
+  const out=[]; let ini=-1;
+  for(let i=0;i<arr.length;i++){
+    if(arr[i]>=umbral){ if(ini<0) ini=i; }
+    else if(ini>=0){ out.push(Math.round((ini+i-1)/2)); ini=-1; }
+  }
+  if(ini>=0) out.push(Math.round((ini+arr.length-1)/2));
+  const fus=[];
+  for(const v of out){
+    if(fus.length && v-fus[fus.length-1] < 8) fus[fus.length-1]=v;
+    else fus.push(v);
+  }
+  return fus;
+}
+
+/* ---- Umbral local (Bradley) ----
+   Mejor que Otsu global cuando el escaneo tiene sombras o líneas tenues:
+   compara cada píxel con el promedio de su vecindario, no de toda la hoja. */
+function binarizarLocal(cv){
+  const {width:w, height:h} = cv;
+  const d = cv.getContext("2d",{willReadFrequently:true}).getImageData(0,0,w,h).data;
+  const gris = new Uint8Array(w*h);
+  for(let i=0,p=0;i<d.length;i+=4,p++)
+    gris[p] = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000 | 0;
+  // imagen integral
+  const S = new Float64Array((w+1)*(h+1));
+  for(let y=0;y<h;y++){
+    let acum = 0;
+    for(let x=0;x<w;x++){
+      acum += gris[y*w+x];
+      S[(y+1)*(w+1)+(x+1)] = S[y*(w+1)+(x+1)] + acum;
+    }
+  }
+  const r = Math.max(8, Math.round(w/16));   // radio del vecindario
+  const t = 0.90;                            // 10% por debajo del promedio local
+  const bin = new Uint8Array(w*h);
+  for(let y=0;y<h;y++){
+    const y0 = Math.max(0,y-r), y1 = Math.min(h-1,y+r);
+    for(let x=0;x<w;x++){
+      const x0 = Math.max(0,x-r), x1 = Math.min(w-1,x+r);
+      const n = (x1-x0+1)*(y1-y0+1);
+      const suma = S[(y1+1)*(w+1)+(x1+1)] - S[y0*(w+1)+(x1+1)]
+                 - S[(y1+1)*(w+1)+x0] + S[y0*(w+1)+x0];
+      bin[y*w+x] = (gris[y*w+x]*n < suma*t) ? 1 : 0;
+    }
+  }
+  return {bin,w,h};
+}
+
+/* ---- Máscaras de línea por longitud de trazo ----
+   Conserva solo píxeles que forman parte de un tramo continuo largo.
+   El texto (trazos de 3-6 px) y las diagonales desaparecen; las líneas
+   de la tabla sobreviven. Tolera cortes de hasta `puente` píxeles. */
+function mascaraHorizontal(bin, w, h, minLargo, puente){
+  const m = new Uint8Array(w*h);
+  const fila = new Uint8Array(w);
+  for(let y=0;y<h;y++){
+    const off = y*w;
+    fila.set(bin.subarray(off, off+w));
+    // cerrar huecos pequeños
+    let ultimo = -1;
+    for(let x=0;x<w;x++){
+      if(fila[x]){
+        if(ultimo >= 0 && x-ultimo <= puente+1)
+          for(let k=ultimo+1;k<x;k++) fila[k] = 1;
+        ultimo = x;
+      }
+    }
+    // conservar tramos largos
+    let ini = -1;
+    for(let x=0;x<=w;x++){
+      if(x<w && fila[x]){ if(ini<0) ini = x; }
+      else if(ini >= 0){
+        if(x-ini >= minLargo) for(let k=ini;k<x;k++) m[off+k] = 1;
+        ini = -1;
+      }
+    }
+  }
+  return m;
+}
+function mascaraVertical(bin, w, h, minLargo, puente){
+  const m = new Uint8Array(w*h);
+  const col = new Uint8Array(h);
+  for(let x=0;x<w;x++){
+    for(let y=0;y<h;y++) col[y] = bin[y*w+x];
+    let ultimo = -1;
+    for(let y=0;y<h;y++){
+      if(col[y]){
+        if(ultimo >= 0 && y-ultimo <= puente+1)
+          for(let k=ultimo+1;k<y;k++) col[k] = 1;
+        ultimo = y;
+      }
+    }
+    let ini = -1;
+    for(let y=0;y<=h;y++){
+      if(y<h && col[y]){ if(ini<0) ini = y; }
+      else if(ini >= 0){
+        if(y-ini >= minLargo) for(let k=ini;k<y;k++) m[k*w+x] = 1;
+        ini = -1;
+      }
+    }
+  }
+  return m;
+}
+
+/* ---- Regularizar: las filas de estos formatos son equiespaciadas ----
+   Descarta líneas dobles y repone las que el escaneo se comió. */
+function regularizar(lineas){
+  if(lineas.length < 3) return lineas;
+  const gaps = [];
+  for(let i=1;i<lineas.length;i++) gaps.push(lineas[i]-lineas[i-1]);
+  const orden = [...gaps].sort((a,b)=>a-b);
+  const med = orden[Math.floor(orden.length/2)];
+  if(!med) return lineas;
+  const out = [lineas[0]];
+  for(let i=1;i<lineas.length;i++){
+    const g = lineas[i] - out[out.length-1];
+    if(g < med*0.55) continue;                      // línea duplicada
+    const faltan = Math.round(g/med) - 1;           // huecos por reponer
+    if(faltan > 0 && faltan <= 4){
+      const paso = g/(faltan+1);
+      for(let k=1;k<=faltan;k++) out.push(Math.round(out[out.length-1]+paso));
+    }
+    out.push(lineas[i]);
+  }
+  return out;
+}
+
+/* ---- Detección automática de la tabla ----
+   Sin parámetros que ajustar: deriva los mínimos del tamaño de la hoja
+   y acota el análisis al recuadro donde realmente hay líneas. */
+function detectarTabla(cv){
+  const chico = reducir(cv, 1600);
+  const fx = cv.width / chico.width;
+  const {bin,w,h} = binarizarLocal(chico);
+
+  const mh = mascaraHorizontal(bin, w, h, Math.round(w*0.22), Math.round(w*0.010));
+  const mv = mascaraVertical  (bin, w, h, Math.round(h*0.10), Math.round(h*0.008));
+
+  // recuadro de la tabla: donde viven las líneas largas
+  let x0=w, x1=0, y0=h, y1=0, hay=false;
+  for(let y=0;y<h;y++){
+    const off=y*w;
+    for(let x=0;x<w;x++){
+      if(mh[off+x] || mv[off+x]){
+        hay=true;
+        if(x<x0)x0=x; if(x>x1)x1=x;
+        if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(!hay) return {cortesY:[], cortesX:[], diag:"No se encontraron líneas de tabla"};
+
+  const bw = x1-x0+1, bh = y1-y0+1;
+  const projY = new Uint32Array(h), projX = new Uint32Array(w);
+  for(let y=y0;y<=y1;y++){
+    const off=y*w;
+    for(let x=x0;x<=x1;x++){
+      if(mh[off+x]) projY[y]++;
+      if(mv[off+x]) projX[x]++;
+    }
+  }
+  let cy = regularizar(agrupar(projY, bw*0.45));
+  let cx = regularizar(agrupar(projX, bh*0.35));
+
+  // segundo intento más permisivo si el primero quedó corto
+  if(cy.length < 3) cy = regularizar(agrupar(projY, bw*0.28));
+  if(cx.length < 3) cx = regularizar(agrupar(projX, bh*0.20));
+
+  const esc = v => Math.round(v*fx);
+  return {
+    cortesY: cy.map(esc),
+    cortesX: cx.map(esc),
+    diag: `${Math.max(0,cy.length-1)} fila(s), ${Math.max(0,cx.length-1)} columna(s)`
+  };
+}
+
+/* ============ DETECCIÓN DE POBLACIÓN Y ORIENTACIÓN ============
+   El encabezado del formato es texto impreso, no manuscrito, así
+   que el OCR sí acierta ahí. Probando los cuatro giros, el que
+   devuelve una palabra reconocible es además el giro correcto.
+   ============================================================= */
+const sinTildes = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+
+function bandaSuperior(cv){
+  // Banda amplia: el título no siempre queda en el borde exacto
+  const alto = Math.round(cv.height * 0.30);
+  const escala = Math.min(2.2, 1800/cv.width);
+  const o = document.createElement("canvas");
+  o.width  = Math.round(cv.width*escala);
+  o.height = Math.round(alto*escala);
+  const ctx = o.getContext("2d", {willReadFrequently:true});
+  ctx.fillStyle = "#fff"; ctx.fillRect(0,0,o.width,o.height);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(cv, 0, 0, cv.width, alto, 0, 0, o.width, o.height);
+  // realce de contraste: el texto impreso se separa del fondo del escaneo
+  const im = ctx.getImageData(0,0,o.width,o.height);
+  const d = im.data;
+  let min=255, max=0;
+  for(let i=0;i<d.length;i+=4){
+    const g = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+    if(g<min) min=g; if(g>max) max=g;
+  }
+  const rango = Math.max(1, max-min);
+  for(let i=0;i<d.length;i+=4){
+    const g = (d[i]*299 + d[i+1]*587 + d[i+2]*114)/1000;
+    let v = (g-min)/rango*255;
+    v = v < 150 ? 0 : 255;
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(im,0,0);
+  return o;
+}
+
+// Coincidencia tolerante: el OCR se equivoca en letras sueltas,
+// así que basta con una raíz reconocible de cada palabra clave.
+const RAICES = [
+  {p:"RECIEN_NACIDOS", r:["nacido","nacidos","recien"]},
+  {p:"MENORES_5",      r:["menore","menor de","de 5 an","5 anos"]},
+  {p:"GESTANTES",      r:["gestant","gestan"]},
+  {p:"ADULTOS",        r:["adulto","adultos"]}
+];
+function emparejar(texto){
+  const t = sinTildes(texto).replace(/\s+/g," ");
+  for(const {p,r} of RAICES)
+    for(const raiz of r)
+      if(t.includes(raiz)) return p;
+  return null;
+}
+
+async function detectarTipoYGiro(src, worker){
+  const orden = src.height > src.width ? [90,270,0,180] : [0,180,90,270];
+  const leido = [];
+  for(const g of orden){
+    let txt = "";
+    try{
+      const r = await worker.recognize(bandaSuperior(transformar(src,g,0)));
+      txt = (r.data.text || "").replace(/\s+/g," ").trim();
+    }catch(e){ leido.push(`${g}\u00b0: error`); continue; }
+    leido.push(`${g}\u00b0: ${txt.slice(0,45) || "(vac\u00edo)"}`);
+    const hit = emparejar(txt);
+    if(hit) return {giro:g, plantilla:hit, leido};
+  }
+  return {giro:null, plantilla:null, leido};
+}
+
+/* ===================== FLUJO ===================== */
+async function cargarArchivo(file){
+  pantalla("scTrabajo");
+  ["leer","orient","tipo","ender","grid"].forEach(p => marcar(p,""));
+  marcar("leer","activo");
+  await esperar();
+
+  S.paginas = [];
+  try{
+    if(file.type === "application/pdf"){
+      const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
+      for(let i=1;i<=pdf.numPages;i++){
+        const pg = await pdf.getPage(i);
+        const vp = pg.getViewport({scale:2.2});
+        const cv = document.createElement("canvas");
+        cv.width = vp.width; cv.height = vp.height;
+        await pg.render({canvasContext:cv.getContext("2d"), viewport:vp}).promise;
+        S.paginas.push(cv);
+      }
+    } else {
+      const img = await createImageBitmap(file);
+      const cv = document.createElement("canvas");
+      cv.width = img.width; cv.height = img.height;
+      cv.getContext("2d").drawImage(img,0,0);
+      S.paginas.push(cv);
+    }
+  }catch(e){
+    marcar("leer","falla","No se pudo leer el archivo. Prueba con otro formato.");
+    return;
+  }
+  marcar("leer","hecho", `Archivo leído · ${S.paginas.length} página(s)`);
+  $("pagina").innerHTML = S.paginas.map((_,i)=>`<option value="${i}">Página ${i+1}</option>`).join("");
+  S.idxPag = 0;
+
+  marcar("orient","activo");
+  await esperar();
+  let det = null, worker = null, motorOk = false, errMotor = "";
+  for(const idioma of ["spa","eng"]){
+    try{
+      worker = await Tesseract.createWorker(idioma);
+      motorOk = true;
+      det = await detectarTipoYGiro(S.paginas[0], worker);
+      break;
+    }catch(e){
+      errMotor = (e && e.message) ? e.message : String(e);
+    }finally{
+      if(worker){ try{ await worker.terminate(); }catch(e){} worker = null; }
+    }
+  }
+  S.lecturaOcr = det ? det.leido : null;
+
+  if(det && det.plantilla){
+    S.giro = det.giro; S.plantilla = det.plantilla; S.auto = true;
+    marcar("orient","hecho", S.giro ? `Hoja girada ${S.giro}°` : "La hoja ya estaba derecha");
+    marcar("tipo","hecho", `Formato reconocido: ${PLANTILLAS[det.plantilla].nombre}`);
+  } else {
+    const p = S.paginas[0];
+    S.giro = p.height > p.width ? 90 : 0;
+    S.auto = false;
+    if(!motorOk){
+      marcar("orient","falla","El lector de encabezados no cargó (red o CDN bloqueado).");
+      marcar("tipo","falla","Elige el formato y el giro tú en Ajustar la detección.");
+    }else{
+      marcar("orient","falla","No se identificó la orientación por el encabezado.");
+      marcar("tipo","falla","El lector sí funcionó pero no halló la palabra clave. Ver detalle abajo.");
+    }
+  }
+
+  marcar("ender","activo");
+  await esperar();
+  S.inclinacion = estimarInclinacion(transformar(S.paginas[0], S.giro, 0));
+  $("inclina").value = S.inclinacion;
+  marcar("ender","hecho", S.inclinacion
+    ? `Inclinación corregida en ${S.inclinacion}°` : "La hoja ya estaba alineada");
+
+  marcar("grid","activo");
+  await esperar();
+  reconstruir();
+  const nf = Math.max(0, S.cortesY.length-1);
+  marcar("grid", nf ? "hecho" : "falla",
+    nf ? `Tabla detectada · ${nf} fila(s)` : "No se encontró la tabla. Revisa el giro en Ajustar la detección.");
+
+  await esperar();
+  entrarCaptura();
+}
+
+function reconstruir(){
+  S.base = transformar(S.paginas[S.idxPag], S.giro, S.inclinacion);
+  const r = detectarTabla(S.base);
+  S.cortesY = r.cortesY; S.cortesX = r.cortesX;
+  const cv = $("lienzoGrid");
+  cv.width = S.base.width; cv.height = S.base.height;
+  const ctx = cv.getContext("2d");
+  ctx.drawImage(S.base,0,0);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgba(29,78,122,.75)";
+  for(const y of S.cortesY){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(cv.width,y); ctx.stroke(); }
+  ctx.strokeStyle = "rgba(180,112,12,.75)";
+  for(const x of S.cortesX){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,cv.height); ctx.stroke(); }
+  const esp = columnas().length;
+  $("notaGrid").textContent =
+    `${Math.max(0,S.cortesY.length-1)} fila(s) y ${Math.max(0,S.cortesX.length-1)} columna(s). ` +
+    `El formato espera ${esp} columnas. ` +
+    (S.cortesX.length-1 === esp
+      ? "Coinciden."
+      : "No coinciden, así que las columnas se reparten proporcionalmente sobre el ancho de la tabla.");
+}
+
+function entrarCaptura(){
+  pantalla("scCaptura");
+  $("plantilla").value = S.plantilla;
+  $("tituloPob").textContent = PLANTILLAS[S.plantilla].nombre;
+  if(S.auto){
+    $("detalle").textContent =
+      `Reconocido en el encabezado del documento. ${Math.max(0,S.cortesY.length-1)} filas por digitar.`;
+  } else {
+    let txt = "No se reconoci\u00f3 el encabezado, as\u00ed que este es el formato por defecto. " +
+              "Confirma la poblaci\u00f3n y revisa el giro en Ajustar la detecci\u00f3n.";
+    if(S.lecturaOcr && S.lecturaOcr.length)
+      txt += "  \u2014  Lo que ley\u00f3 en cada giro: " + S.lecturaOcr.join("  |  ");
+    else
+      txt += "  \u2014  El lector de encabezados no lleg\u00f3 a ejecutarse.";
+    $("detalle").textContent = txt;
+  }
+  $("ajustes").open = !S.auto;
+  prepararDatos();
+  irA(0,0);
+}
+
+/* ===================== CAPTURA ===================== */
+const columnas = () => PLANTILLAS[S.plantilla].columnas;
+
+function prepararDatos(){
+  const cols = columnas();
+  const nf = Math.max(0, S.cortesY.length-1);
+  const viejo = S.datos;
+  S.datos = [];
+  for(let f=0; f<nf; f++){
+    const o = {};
+    for(const c of cols){
+      const prev = viejo[f] && viejo[f][c.k];
+      o[c.k] = prev || {v: c.fijo || "", estado: c.fijo ? "ok" : "vacio"};
+    }
+    S.datos.push(o);
+  }
+  S.fila = 0; S.col = 0;
+  pintarTabla();
+}
+
+function irA(f,c){
+  const cols = columnas();
+  if(!S.datos.length){
+    $("ubic").textContent = "No se detectaron filas. Revisa el giro y la inclinación en Ajustar la detección.";
+    return;
+  }
+  if(f < 0) f = 0;
+  if(f >= S.datos.length){
+    $("aviso").textContent = "Recorriste todas las filas. Ya puedes descargar el Excel.";
+    $("aviso").className = "aviso ok";
+    return;
+  }
+  S.fila = f; S.col = Math.max(0, Math.min(c, cols.length-1));
+  const col = cols[S.col];
+
+  const y0 = S.cortesY[S.fila], y1 = S.cortesY[S.fila+1];
+  let x0, x1;
+  if(S.cortesX.length >= cols.length+1){
+    x0 = S.cortesX[S.col]; x1 = S.cortesX[S.col+1];
+  } else {
+    const tot = cols.reduce((a,b)=>a+b.ancho,0);
+    const izq = S.cortesX.length ? S.cortesX[0] : 0;
+    const der = S.cortesX.length ? S.cortesX[S.cortesX.length-1] : S.base.width;
+    let acum = 0;
+    for(let i=0;i<S.col;i++) acum += cols[i].ancho;
+    x0 = izq + (der-izq)*acum/tot;
+    x1 = x0 + (der-izq)*col.ancho/tot;
+  }
+  const m = 3;
+  const rx = Math.max(0,x0-m), ry = Math.max(0,y0-m);
+  const rw = Math.min(S.base.width-rx, x1-x0+2*m);
+  const rh = Math.min(S.base.height-ry, y1-y0+2*m);
+
+  const dst = $("recorte");
+  const esc = Math.min(4, Math.max(1.5, 520/Math.max(1,rw)));
+  dst.width = rw*esc; dst.height = rh*esc;
+  const ctx = dst.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(S.base, rx, ry, rw, rh, 0, 0, dst.width, dst.height);
+
+  $("ubic").innerHTML = `Fila <b>${S.fila+1}</b> de ${S.datos.length} · Campo <b>${S.col+1}</b> de ${cols.length}`;
+  $("etiqCampo").textContent = col.k.replace(/_/g," ").toLowerCase()
+    .replace(/^./,s=>s.toUpperCase()) + (col.opcional ? " (opcional)" : "");
+  const campo = $("campo");
+  campo.value = S.datos[S.fila][col.k].v;
+  campo.className = col.num ? "num" : "";
+  campo.focus(); campo.select();
+  $("aviso").textContent = col.opciones ? "Opciones: " + col.opciones.join(", ") : "";
+  $("aviso").className = "aviso";
+  $("barra").style.width = ((S.fila*cols.length + S.col)/(S.datos.length*cols.length)*100) + "%";
+}
+
+function guardarActual(){
+  if(!S.datos.length) return;
+  const col = columnas()[S.col];
+  let v = $("campo").value.trim();
+  const fila = Object.fromEntries(Object.entries(S.datos[S.fila]).map(([k,o])=>[k,o.v]));
+  const r = validarCelda(col, v, fila);
+  if(r.norm) v = r.norm;
+  S.datos[S.fila][col.k] = {v, estado:
+    v === "[ILEGIBLE]" ? "ilegible" : (v === "" ? "vacio" : (r.ok === false ? "dudoso" : "ok"))};
+  pintarTabla();
+}
+function avanzar(dir){
+  guardarActual();
+  const n = columnas().length;
+  let c = S.col + dir, f = S.fila;
+  if(c >= n){ c = 0; f++; }
+  if(c < 0){ c = n-1; f--; }
+  if(f < 0){ f = 0; c = 0; }
+  irA(f,c);
+}
+const escapar = s => String(s).replace(/[<>&]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+function pintarTabla(){
+  const cols = columnas();
+  let h = "<thead><tr><th>#</th>" + cols.map(c=>`<th>${c.k.replace(/_/g," ")}</th>`).join("") + "</tr></thead><tbody>";
+  S.datos.forEach((r,i)=>{
+    h += `<tr><td>${i+1}</td>` + cols.map(c=>{
+      const o = r[c.k];
+      const cl = o.estado === "dudoso" ? "d" : (o.estado === "ilegible" ? "v" : "");
+      return `<td class="${cl}">${escapar(o.v)}</td>`;
+    }).join("") + "</tr>";
+  });
+  $("tablaRev").innerHTML = h + "</tbody>";
+}
+
+/* ===================== EXPORTACIÓN ===================== */
+function filasUtiles(){
+  const cols = columnas();
+  return S.datos.filter(r => cols.some(c => !c.fijo && r[c.k].v !== ""));
+}
+function exportarXlsx(){
+  guardarActual();
+  const cols = columnas(), utiles = filasUtiles();
+  if(!utiles.length){
+    $("aviso").textContent = "Todavía no hay filas con datos."; $("aviso").className="aviso mal"; return;
+  }
+  const enc = ["N°", ...cols.map(c=>c.k), "REVISAR"];
+  const aoa = [enc];
+  utiles.forEach((r,n)=>{
+    const rev = cols.filter(c=>["dudoso","ilegible"].includes(r[c.k].estado)).map(c=>c.k).join("; ");
+    aoa.push([n+1, ...cols.map(c=>r[c.k].v), rev]);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = enc.map(h=>({wch: Math.min(30, Math.max(10, h.length+3))}));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, PLANTILLAS[S.plantilla].nombre.slice(0,28));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Digitalizador de caracterizaciones"],
+    ["Subred Integrada de Servicios de Salud Sur E.S.E."],
+    ["Elaborado por", "Alejandro Ortega — Subred Sur · SISVAN"],
+    [],
+    ["Formato", PLANTILLAS[S.plantilla].nombre],
+    ["Fecha de digitación", new Date().toISOString().slice(0,10)],
+    ["Filas exportadas", utiles.length],
+    ["Celdas por revisar",
+      utiles.reduce((a,r)=>a+cols.filter(c=>["dudoso","ilegible"].includes(r[c.k].estado)).length,0)],
+    [],
+    ["La columna REVISAR lista los campos dudosos o ilegibles."],
+    ["Verificarlos contra el documento físico antes de cargarlos a la base."]
+  ]), "Control");
+  XLSX.writeFile(wb, `caracterizacion_${S.plantilla.toLowerCase()}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function exportarCsv(){
+  guardarActual();
+  const cols = columnas();
+  const l = [["N°", ...cols.map(c=>c.k)].join(";")];
+  filasUtiles().forEach((r,n)=> l.push([n+1, ...cols.map(c=>`"${r[c.k].v.replace(/"/g,'""')}"`)].join(";")));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\uFEFF"+l.join("\r\n")], {type:"text/csv;charset=utf-8"}));
+  a.download = `caracterizacion_${S.plantilla.toLowerCase()}.csv`;
+  a.click();
+}
+
+/* ===================== EVENTOS ===================== */
+$("plantilla").innerHTML = Object.entries(PLANTILLAS)
+  .map(([k,v])=>`<option value="${k}">${v.nombre}</option>`).join("");
+
+const zona = $("zona");
+zona.onclick = () => $("archivo").click();
+zona.ondragover = e => { e.preventDefault(); zona.classList.add("sobre"); };
+zona.ondragleave = () => zona.classList.remove("sobre");
+zona.ondrop = e => { e.preventDefault(); zona.classList.remove("sobre");
+  if(e.dataTransfer.files[0]) cargarArchivo(e.dataTransfer.files[0]); };
+$("archivo").onchange = e => { if(e.target.files[0]) cargarArchivo(e.target.files[0]); };
+
+$("plantilla").onchange = e => {
+  S.plantilla = e.target.value;
+  $("tituloPob").textContent = PLANTILLAS[S.plantilla].nombre;
+  reconstruir(); prepararDatos(); irA(0,0);
+};
+$("btnOtro").onclick = () => { $("archivo").value = ""; pantalla("scCarga"); };
+$("pagina").onchange = e => {
+  S.idxPag = +e.target.value;
+  S.inclinacion = estimarInclinacion(transformar(S.paginas[S.idxPag], S.giro, 0));
+  $("inclina").value = S.inclinacion;
+  reconstruir(); prepararDatos(); irA(0,0);
+};
+$("btnGirar").onclick = () => { S.giro = (S.giro+90)%360; reconstruir(); prepararDatos(); irA(0,0); };
+$("inclina").oninput = e => { S.inclinacion = parseFloat(e.target.value)||0; reconstruir(); };
+$("btnRedetectar").onclick = () => { reconstruir(); prepararDatos(); irA(0,0); };
+
+$("campo").addEventListener("input", () => {
+  if(!S.datos.length) return;
+  const col = columnas()[S.col];
+  const v = $("campo").value.trim();
+  const fila = Object.fromEntries(Object.entries(S.datos[S.fila]).map(([k,o])=>[k,o.v]));
+  const r = validarCelda(col, v, fila);
+  const campo = $("campo"), aviso = $("aviso");
+  campo.classList.remove("mal","dudo");
+  if(v === ""){ aviso.textContent=""; aviso.className="aviso"; return; }
+  if(r.ok === false){ campo.classList.add("mal"); aviso.textContent=r.msg; aviso.className="aviso mal"; }
+  else if(r.ok === null){ campo.classList.add("dudo"); aviso.textContent=r.msg; aviso.className="aviso dudo"; }
+  else { aviso.textContent="Válido"; aviso.className="aviso ok"; }
+});
+$("campo").addEventListener("keydown", e => {
+  if(e.key === "Enter"){ e.preventDefault(); avanzar(e.shiftKey ? -1 : 1); }
+  else if(e.key === "Escape"){ $("campo").value=""; $("campo").dispatchEvent(new Event("input")); }
+  else if(e.ctrlKey && e.key.toLowerCase() === "i"){ e.preventDefault();
+    $("campo").value = "[ILEGIBLE]"; avanzar(1); }
+  else if(e.ctrlKey && e.key === "ArrowDown"){ e.preventDefault(); guardarActual(); irA(S.fila+1, 0); }
+});
+$("btnSig").onclick = () => avanzar(1);
+$("btnAtras").onclick = () => avanzar(-1);
+$("btnXlsx").onclick = exportarXlsx;
+$("btnCsv").onclick = exportarCsv;
+</script>
+</body>
+</html>
